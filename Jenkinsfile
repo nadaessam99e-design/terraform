@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         AWS_REGION   = 'us-east-1'
-        ECR_REPO     = 'YOUR_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/shopflow'
+        ECR_REPO     = '114223852322.dkr.ecr.us-east-1.amazonaws.com/shopflow-app'
         IMAGE_TAG    = "${BUILD_NUMBER}"
         TF_DIR       = 'terraform'
     }
@@ -21,7 +21,7 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t shopflow:${IMAGE_TAG} .'
+                sh 'docker build -t shopflow-app:${IMAGE_TAG} .'
             }
         }
 
@@ -38,8 +38,9 @@ pipeline {
                         aws ecr get-login-password --region $AWS_REGION | \
                         docker login --username AWS --password-stdin $ECR_REPO
 
-                        docker tag shopflow:${IMAGE_TAG} ${ECR_REPO}:${IMAGE_TAG}
-                        docker tag shopflow:${IMAGE_TAG} ${ECR_REPO}:latest
+                        docker tag shopflow-app:${IMAGE_TAG} ${ECR_REPO}:${IMAGE_TAG}
+                        docker tag shopflow-app:${IMAGE_TAG} ${ECR_REPO}:latest
+
                         docker push ${ECR_REPO}:${IMAGE_TAG}
                         docker push ${ECR_REPO}:latest
                     '''
@@ -108,9 +109,9 @@ pipeline {
                             --parameters commands="[
                                 'aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REPO',
                                 'docker pull ${ECR_REPO}:latest',
-                                'docker stop shopflow || true',
-                                'docker rm shopflow || true',
-                                'docker run -d --name shopflow -p 3000:3000 ${ECR_REPO}:latest'
+                                'docker stop shopflow-app || true',
+                                'docker rm shopflow-app || true',
+                                'docker run -d --name shopflow-app -p 3000:3000 ${ECR_REPO}:latest'
                             ]"
                     '''
                 }
