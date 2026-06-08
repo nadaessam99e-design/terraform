@@ -2,10 +2,10 @@ pipeline {
     agent any
 
     environment {
-        ACR_REGISTRY  = 'kokoregistry.azurecr.io'
-        ACR_REPO      = 'kokoregistry.azurecr.io/shopflow-app'
-        IMAGE_TAG     = "${BUILD_NUMBER}"
-        TF_DIR        = 'terraform'
+        ACR_REGISTRY = 'kokoregistry.azurecr.io'
+        ACR_REPO     = 'kokoregistry.azurecr.io/ecomerce-backend'
+        IMAGE_TAG    = "${BUILD_NUMBER}"
+        TF_DIR       = 'terraform'
     }
 
     stages {
@@ -21,30 +21,23 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t shopflow-app:${IMAGE_TAG} .'
+                sh 'docker build -t ecomerce-backend:${IMAGE_TAG} .'
             }
         }
 
         stage('Push to ACR') {
             steps {
                 withCredentials([
-                    string(credentialsId: 'AZURE_CLIENT_ID',       variable: 'AZURE_CLIENT_ID'),
-                    string(credentialsId: 'AZURE_CLIENT_SECRET',   variable: 'AZURE_CLIENT_SECRET'),
-                    string(credentialsId: 'AZURE_TENANT_ID',       variable: 'AZURE_TENANT_ID'),
-                    string(credentialsId: 'AZURE_SUBSCRIPTION_ID', variable: 'AZURE_SUBSCRIPTION_ID')
+                    string(credentialsId: 'ACR_USERNAME', variable: 'ACR_USERNAME'),
+                    string(credentialsId: 'ACR_PASSWORD', variable: 'ACR_PASSWORD')
                 ]) {
                     sh '''
-                        az login --service-principal \
-                            --username $AZURE_CLIENT_ID \
-                            --password $AZURE_CLIENT_SECRET \
-                            --tenant $AZURE_TENANT_ID
+                        echo "$ACR_PASSWORD" | docker login "$ACR_REGISTRY" \
+                            --username "$ACR_USERNAME" \
+                            --password-stdin
 
-                        az account set --subscription $AZURE_SUBSCRIPTION_ID
-
-                        az acr login --name kokoregistry
-
-                        docker tag shopflow-app:${IMAGE_TAG} ${ACR_REPO}:${IMAGE_TAG}
-                        docker tag shopflow-app:${IMAGE_TAG} ${ACR_REPO}:latest
+                        docker tag ecomerce-backend:${IMAGE_TAG} ${ACR_REPO}:${IMAGE_TAG}
+                        docker tag ecomerce-backend:${IMAGE_TAG} ${ACR_REPO}:latest
 
                         docker push ${ACR_REPO}:${IMAGE_TAG}
                         docker push ${ACR_REPO}:latest
@@ -56,17 +49,10 @@ pipeline {
         stage('Terraform Plan') {
             steps {
                 withCredentials([
-                    string(credentialsId: 'AZURE_CLIENT_ID',       variable: 'AZURE_CLIENT_ID'),
-                    string(credentialsId: 'AZURE_CLIENT_SECRET',   variable: 'AZURE_CLIENT_SECRET'),
-                    string(credentialsId: 'AZURE_TENANT_ID',       variable: 'AZURE_TENANT_ID'),
-                    string(credentialsId: 'AZURE_SUBSCRIPTION_ID', variable: 'AZURE_SUBSCRIPTION_ID')
+                    string(credentialsId: 'ACR_USERNAME', variable: 'ACR_USERNAME'),
+                    string(credentialsId: 'ACR_PASSWORD', variable: 'ACR_PASSWORD')
                 ]) {
                     sh '''
-                        export ARM_CLIENT_ID=$AZURE_CLIENT_ID
-                        export ARM_CLIENT_SECRET=$AZURE_CLIENT_SECRET
-                        export ARM_TENANT_ID=$AZURE_TENANT_ID
-                        export ARM_SUBSCRIPTION_ID=$AZURE_SUBSCRIPTION_ID
-
                         cd ${TF_DIR}
                         terraform init
                         terraform validate
@@ -87,17 +73,10 @@ pipeline {
         stage('Deploy') {
             steps {
                 withCredentials([
-                    string(credentialsId: 'AZURE_CLIENT_ID',       variable: 'AZURE_CLIENT_ID'),
-                    string(credentialsId: 'AZURE_CLIENT_SECRET',   variable: 'AZURE_CLIENT_SECRET'),
-                    string(credentialsId: 'AZURE_TENANT_ID',       variable: 'AZURE_TENANT_ID'),
-                    string(credentialsId: 'AZURE_SUBSCRIPTION_ID', variable: 'AZURE_SUBSCRIPTION_ID')
+                    string(credentialsId: 'ACR_USERNAME', variable: 'ACR_USERNAME'),
+                    string(credentialsId: 'ACR_PASSWORD', variable: 'ACR_PASSWORD')
                 ]) {
                     sh '''
-                        export ARM_CLIENT_ID=$AZURE_CLIENT_ID
-                        export ARM_CLIENT_SECRET=$AZURE_CLIENT_SECRET
-                        export ARM_TENANT_ID=$AZURE_TENANT_ID
-                        export ARM_SUBSCRIPTION_ID=$AZURE_SUBSCRIPTION_ID
-
                         cd ${TF_DIR}
                         terraform apply tfplan
                     '''
@@ -108,30 +87,18 @@ pipeline {
         stage('VM Pull Image') {
             steps {
                 withCredentials([
-                    string(credentialsId: 'AZURE_CLIENT_ID',       variable: 'AZURE_CLIENT_ID'),
-                    string(credentialsId: 'AZURE_CLIENT_SECRET',   variable: 'AZURE_CLIENT_SECRET'),
-                    string(credentialsId: 'AZURE_TENANT_ID',       variable: 'AZURE_TENANT_ID'),
-                    string(credentialsId: 'AZURE_SUBSCRIPTION_ID', variable: 'AZURE_SUBSCRIPTION_ID')
+                    string(credentialsId: 'ACR_USERNAME', variable: 'ACR_USERNAME'),
+                    string(credentialsId: 'ACR_PASSWORD', variable: 'ACR_PASSWORD')
                 ]) {
                     sh '''
-                        az login --service-principal \
-                            --username $AZURE_CLIENT_ID \
-                            --password $AZURE_CLIENT_SECRET \
-                            --tenant $AZURE_TENANT_ID
+                        echo "$ACR_PASSWORD" | docker login "$ACR_REGISTRY" \
+                            --username "$ACR_USERNAME" \
+                            --password-stdin
 
-                        az account set --subscription $AZURE_SUBSCRIPTION_ID
-
-                        az vm run-command invoke \
-                            --resource-group shopflow-rg \
-                            --name shopflow-vm \
-                            --command-id RunShellScript \
-                            --scripts "
-                                az acr login --name kokoregistry
-                                docker pull ${ACR_REPO}:latest
-                                docker stop shopflow-app || true
-                                docker rm shopflow-app || true
-                                docker run -d --name shopflow-app -p 3000:3000 ${ACR_REPO}:latest
-                            "
+                        docker pull ${ACR_REPO}:latest
+                        docker stop ecomerce-backend || true
+                        docker rm ecomerce-backend || true
+                        docker run -d --name ecomerce-backend -p 3000:3000 ${ACR_REPO}:latest
                     '''
                 }
             }
