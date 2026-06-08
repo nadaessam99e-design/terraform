@@ -2,10 +2,10 @@ pipeline {
     agent any
 
     environment {
-        AWS_REGION   = 'us-east-1'
-        ECR_REPO     = '114223852322.dkr.ecr.us-east-1.amazonaws.com/shopflow-app'
-        IMAGE_TAG    = "${BUILD_NUMBER}"
-        TF_DIR       = 'terraform'
+        ACR_REGISTRY  = 'kokoregistry.azurecr.io'
+        ACR_REPO      = 'kokoregistry.azurecr.io/shopflow-app'
+        IMAGE_TAG     = "${BUILD_NUMBER}"
+        TF_DIR        = 'terraform'
     }
 
     stages {
@@ -25,24 +25,29 @@ pipeline {
             }
         }
 
-        stage('Push to ECR') {
+        stage('Push to ACR') {
             steps {
                 withCredentials([
-                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
-                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')
+                    string(credentialsId: 'AZURE_CLIENT_ID',       variable: 'AZURE_CLIENT_ID'),
+                    string(credentialsId: 'AZURE_CLIENT_SECRET',   variable: 'AZURE_CLIENT_SECRET'),
+                    string(credentialsId: 'AZURE_TENANT_ID',       variable: 'AZURE_TENANT_ID'),
+                    string(credentialsId: 'AZURE_SUBSCRIPTION_ID', variable: 'AZURE_SUBSCRIPTION_ID')
                 ]) {
                     sh '''
-                        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-                        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+                        az login --service-principal \
+                            --username $AZURE_CLIENT_ID \
+                            --password $AZURE_CLIENT_SECRET \
+                            --tenant $AZURE_TENANT_ID
 
-                        aws ecr get-login-password --region $AWS_REGION | \
-                        docker login --username AWS --password-stdin $ECR_REPO
+                        az account set --subscription $AZURE_SUBSCRIPTION_ID
 
-                        docker tag shopflow-app:${IMAGE_TAG} ${ECR_REPO}:${IMAGE_TAG}
-                        docker tag shopflow-app:${IMAGE_TAG} ${ECR_REPO}:latest
+                        az acr login --name kokoregistry
 
-                        docker push ${ECR_REPO}:${IMAGE_TAG}
-                        docker push ${ECR_REPO}:latest
+                        docker tag shopflow-app:${IMAGE_TAG} ${ACR_REPO}:${IMAGE_TAG}
+                        docker tag shopflow-app:${IMAGE_TAG} ${ACR_REPO}:latest
+
+                        docker push ${ACR_REPO}:${IMAGE_TAG}
+                        docker push ${ACR_REPO}:latest
                     '''
                 }
             }
@@ -51,12 +56,16 @@ pipeline {
         stage('Terraform Plan') {
             steps {
                 withCredentials([
-                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
-                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')
+                    string(credentialsId: 'AZURE_CLIENT_ID',       variable: 'AZURE_CLIENT_ID'),
+                    string(credentialsId: 'AZURE_CLIENT_SECRET',   variable: 'AZURE_CLIENT_SECRET'),
+                    string(credentialsId: 'AZURE_TENANT_ID',       variable: 'AZURE_TENANT_ID'),
+                    string(credentialsId: 'AZURE_SUBSCRIPTION_ID', variable: 'AZURE_SUBSCRIPTION_ID')
                 ]) {
                     sh '''
-                        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-                        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+                        export ARM_CLIENT_ID=$AZURE_CLIENT_ID
+                        export ARM_CLIENT_SECRET=$AZURE_CLIENT_SECRET
+                        export ARM_TENANT_ID=$AZURE_TENANT_ID
+                        export ARM_SUBSCRIPTION_ID=$AZURE_SUBSCRIPTION_ID
 
                         cd ${TF_DIR}
                         terraform init
@@ -70,7 +79,7 @@ pipeline {
         stage('Approval') {
             steps {
                 timeout(time: 10, unit: 'MINUTES') {
-                    input message: 'Deploy to AWS?', ok: 'Yes, Deploy!'
+                    input message: 'Deploy to Azure?', ok: 'Yes, Deploy!'
                 }
             }
         }
@@ -78,12 +87,16 @@ pipeline {
         stage('Deploy') {
             steps {
                 withCredentials([
-                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
-                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')
+                    string(credentialsId: 'AZURE_CLIENT_ID',       variable: 'AZURE_CLIENT_ID'),
+                    string(credentialsId: 'AZURE_CLIENT_SECRET',   variable: 'AZURE_CLIENT_SECRET'),
+                    string(credentialsId: 'AZURE_TENANT_ID',       variable: 'AZURE_TENANT_ID'),
+                    string(credentialsId: 'AZURE_SUBSCRIPTION_ID', variable: 'AZURE_SUBSCRIPTION_ID')
                 ]) {
                     sh '''
-                        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-                        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+                        export ARM_CLIENT_ID=$AZURE_CLIENT_ID
+                        export ARM_CLIENT_SECRET=$AZURE_CLIENT_SECRET
+                        export ARM_TENANT_ID=$AZURE_TENANT_ID
+                        export ARM_SUBSCRIPTION_ID=$AZURE_SUBSCRIPTION_ID
 
                         cd ${TF_DIR}
                         terraform apply tfplan
@@ -92,27 +105,33 @@ pipeline {
             }
         }
 
-        stage('EC2 Pull Image') {
+        stage('VM Pull Image') {
             steps {
                 withCredentials([
-                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
-                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')
+                    string(credentialsId: 'AZURE_CLIENT_ID',       variable: 'AZURE_CLIENT_ID'),
+                    string(credentialsId: 'AZURE_CLIENT_SECRET',   variable: 'AZURE_CLIENT_SECRET'),
+                    string(credentialsId: 'AZURE_TENANT_ID',       variable: 'AZURE_TENANT_ID'),
+                    string(credentialsId: 'AZURE_SUBSCRIPTION_ID', variable: 'AZURE_SUBSCRIPTION_ID')
                 ]) {
                     sh '''
-                        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-                        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+                        az login --service-principal \
+                            --username $AZURE_CLIENT_ID \
+                            --password $AZURE_CLIENT_SECRET \
+                            --tenant $AZURE_TENANT_ID
 
-                        aws ssm send-command \
-                            --region $AWS_REGION \
-                            --document-name "AWS-RunShellScript" \
-                            --targets "Key=tag:Name,Values=shopflow-ec2" \
-                            --parameters commands="[
-                                'aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REPO',
-                                'docker pull ${ECR_REPO}:latest',
-                                'docker stop shopflow-app || true',
-                                'docker rm shopflow-app || true',
-                                'docker run -d --name shopflow-app -p 3000:3000 ${ECR_REPO}:latest'
-                            ]"
+                        az account set --subscription $AZURE_SUBSCRIPTION_ID
+
+                        az vm run-command invoke \
+                            --resource-group shopflow-rg \
+                            --name shopflow-vm \
+                            --command-id RunShellScript \
+                            --scripts "
+                                az acr login --name kokoregistry
+                                docker pull ${ACR_REPO}:latest
+                                docker stop shopflow-app || true
+                                docker rm shopflow-app || true
+                                docker run -d --name shopflow-app -p 3000:3000 ${ACR_REPO}:latest
+                            "
                     '''
                 }
             }
